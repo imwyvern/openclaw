@@ -77,13 +77,13 @@ read_when:
 
 ### 配置参考
 
-| 字段                                        | 必需 | 描述                                                                     |
-| ------------------------------------------- | ---- | ------------------------------------------------------------------------ |
-| `gateway.trustedProxies`                    | 是   | 要信任的代理 IP 地址数组。来自其他 IP 的请求将被拒绝。                   |
-| `gateway.auth.mode`                         | 是   | 必须为 `"trusted-proxy"`                                                 |
-| `gateway.auth.trustedProxy.userHeader`      | 是   | 包含已认证用户身份的头名称                                               |
-| `gateway.auth.trustedProxy.requiredHeaders` | 否   | 请求被信任时必须存在的额外头                                             |
-| `gateway.auth.trustedProxy.allowUsers`      | 否   | 用户身份白名单。空值表示允许所有已认证用户。                             |
+| 字段                                        | 必需 | 描述                                                   |
+| ------------------------------------------- | ---- | ------------------------------------------------------ |
+| `gateway.trustedProxies`                    | 是   | 要信任的代理 IP 地址数组。来自其他 IP 的请求将被拒绝。 |
+| `gateway.auth.mode`                         | 是   | 必须为 `"trusted-proxy"`                               |
+| `gateway.auth.trustedProxy.userHeader`      | 是   | 包含已认证用户身份的头名称                             |
+| `gateway.auth.trustedProxy.requiredHeaders` | 否   | 请求被信任时必须存在的额外头                           |
+| `gateway.auth.trustedProxy.allowUsers`      | 否   | 用户身份白名单。空值表示允许所有已认证用户。           |
 
 ## TLS 终止和 HSTS
 
@@ -287,7 +287,7 @@ location / {
 - 头名称是否正确？（不区分大小写，但拼写很重要）
 - 用户是否确实在代理端完成了认证？
 
-### "trusted_proxy_missing_header_\*"
+### "trusted*proxy_missing_header*\*"
 
 必需的头不存在。请检查：
 
