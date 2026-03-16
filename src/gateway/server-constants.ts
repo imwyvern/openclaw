@@ -22,18 +22,20 @@ export const __setMaxChatHistoryMessagesBytesForTest = (value?: number) => {
   }
 };
 export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+const parseHandshakeTimeoutOverride = (value?: string) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= MAX_TIMER_DELAY_MS ? parsed : undefined;
+};
+
 export const getHandshakeTimeoutMs = () => {
-  // User-facing env var (works in all environments); test-only var gated behind VITEST
-  const envKey =
+  // User-facing env var works everywhere; test-only override applies only under Vitest
+  // and only when the production override is unset or empty.
+  const envValue =
     process.env.OPENCLAW_HANDSHAKE_TIMEOUT_MS ||
-    (process.env.VITEST && process.env.OPENCLAW_TEST_HANDSHAKE_TIMEOUT_MS);
-  if (envKey) {
-    const parsed = Number(envKey);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return DEFAULT_HANDSHAKE_TIMEOUT_MS;
+    (process.env.VITEST ? process.env.OPENCLAW_TEST_HANDSHAKE_TIMEOUT_MS : undefined);
+  return parseHandshakeTimeoutOverride(envValue) ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
 };
 export const TICK_INTERVAL_MS = 30_000;
 export const HEALTH_REFRESH_INTERVAL_MS = 60_000;
