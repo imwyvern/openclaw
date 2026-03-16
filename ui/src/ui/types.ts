@@ -396,6 +396,7 @@ export type GatewaySessionRow = {
   endedAt?: number;
   runtimeMs?: number;
   childSessions?: string[];
+  totalTokensFresh?: boolean;
   model?: string;
   modelProvider?: string;
   contextTokens?: number;
