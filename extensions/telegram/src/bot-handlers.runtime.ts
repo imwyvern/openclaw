@@ -33,8 +33,6 @@ import {
 } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveStoredModelOverride } from "openclaw/plugin-sdk/reply-runtime";
 import { buildCommandsMessagePaginated } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
-import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { danger, logVerbose, warn } from "openclaw/plugin-sdk/runtime-env";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import {
@@ -68,8 +66,8 @@ import {
 } from "./bot/helpers.js";
 import type { TelegramContext } from "./bot/types.js";
 import {
-  resolveTelegramConversationBaseSessionKey,
   resolveTelegramConversationRoute,
+  resolveTelegramConversationSession,
 } from "./conversation-route.js";
 import { enforceTelegramDmAccess } from "./dm-access.js";
 import {
@@ -289,30 +287,30 @@ export const registerTelegramHandlers = ({
     const dmThreadId = !params.isGroup ? params.messageThreadId : undefined;
     const topicThreadId = resolvedThreadId ?? dmThreadId;
     const { topicConfig } = resolveTelegramGroupConfig(params.chatId, topicThreadId);
-    const { route } = resolveTelegramConversationRoute({
-      cfg,
-      accountId,
-      chatId: params.chatId,
-      isGroup: params.isGroup,
-      resolvedThreadId,
-      replyThreadId: topicThreadId,
-      senderId: params.senderId,
-      topicAgentId: topicConfig?.agentId,
-    });
-    const baseSessionKey = resolveTelegramConversationBaseSessionKey({
+    const { route, configuredBinding, configuredBindingSessionKey } =
+      resolveTelegramConversationRoute({
+        cfg,
+        accountId,
+        chatId: params.chatId,
+        isGroup: params.isGroup,
+        resolvedThreadId,
+        replyThreadId: topicThreadId,
+        senderId: params.senderId,
+        topicAgentId: topicConfig?.agentId,
+      });
+    const session = resolveTelegramConversationSession({
       cfg,
       route,
       chatId: params.chatId,
       isGroup: params.isGroup,
       senderId: params.senderId,
+      dmThreadId,
+      configuredBinding,
+      configuredBindingSessionKey,
     });
-    const threadKeys =
-      dmThreadId != null
-        ? resolveThreadSessionKeys({ baseSessionKey, threadId: `${params.chatId}:${dmThreadId}` })
-        : null;
-    const sessionKey = threadKeys?.sessionKey ?? baseSessionKey;
+    const sessionKey = session.sessionKey;
     const storePath = telegramDeps.resolveStorePath(cfg.session?.store, {
-      agentId: route.agentId,
+      agentId: session.route.agentId,
     });
     const store = loadSessionStore(storePath);
     const entry = resolveSessionStoreEntry({ store, sessionKey }).existing;
@@ -323,7 +321,7 @@ export const registerTelegramHandlers = ({
     });
     if (storedOverride) {
       return {
-        agentId: route.agentId,
+        agentId: session.route.agentId,
         sessionEntry: entry,
         sessionKey,
         model: storedOverride.provider
@@ -343,7 +341,7 @@ export const registerTelegramHandlers = ({
     }
     const modelCfg = cfg.agents?.defaults?.model;
     return {
-      agentId: route.agentId,
+      agentId: session.route.agentId,
       sessionEntry: entry,
       sessionKey,
       model: typeof modelCfg === "string" ? modelCfg : modelCfg?.primary,
@@ -829,17 +827,26 @@ export const registerTelegramHandlers = ({
       const resolvedThreadId = isForum
         ? resolveTelegramForumThreadId({ isForum, messageThreadId: undefined })
         : undefined;
-      const peerId = isGroup ? buildTelegramGroupPeerId(chatId, resolvedThreadId) : String(chatId);
-      const parentPeer = buildTelegramParentPeer({ isGroup, resolvedThreadId, chatId });
-      // Fresh config for bindings lookup; other routing inputs are payload-derived.
-      const route = resolveAgentRoute({
-        cfg: telegramDeps.loadConfig(),
-        channel: "telegram",
-        accountId,
-        peer: { kind: isGroup ? "group" : "direct", id: peerId },
-        parentPeer,
+      const freshCfg = telegramDeps.loadConfig();
+      const { route, configuredBinding, configuredBindingSessionKey } =
+        resolveTelegramConversationRoute({
+          cfg: freshCfg,
+          accountId,
+          chatId,
+          isGroup,
+          resolvedThreadId,
+          senderId,
+        });
+      const session = resolveTelegramConversationSession({
+        cfg: freshCfg,
+        route,
+        chatId,
+        isGroup,
+        senderId,
+        configuredBinding,
+        configuredBindingSessionKey,
       });
-      const sessionKey = route.sessionKey;
+      const sessionKey = session.sessionKey;
 
       // Enqueue system event for each added reaction.
       for (const r of addedReactions) {

@@ -9,6 +9,7 @@ import {
   buildAgentSessionKey,
   deriveLastRoutePolicy,
   resolveAgentRoute,
+  resolveThreadSessionKeys,
 } from "openclaw/plugin-sdk/routing";
 import {
   buildAgentMainSessionKey,
@@ -184,4 +185,77 @@ export function resolveTelegramConversationBaseSessionKey(params: {
     dmScope: "per-account-channel-peer",
     identityLinks: params.cfg.session?.identityLinks,
   }).toLowerCase();
+}
+
+export function resolveTelegramConversationSession(params: {
+  cfg: OpenClawConfig;
+  route: ReturnType<typeof resolveAgentRoute>;
+  chatId: number | string;
+  isGroup: boolean;
+  senderId?: string | number | null;
+  dmThreadId?: number;
+  configuredBinding?: ConfiguredBindingRouteResult["bindingResolution"];
+  configuredBindingSessionKey?: string | null;
+}): {
+  baseSessionKey: string;
+  sessionKey: string;
+  route: ReturnType<typeof resolveAgentRoute>;
+} {
+  let baseSessionKey = resolveTelegramConversationBaseSessionKey({
+    cfg: params.cfg,
+    route: params.route,
+    chatId: params.chatId,
+    isGroup: params.isGroup,
+    senderId: params.senderId,
+  });
+  const isNamedAccountFallback =
+    params.route.accountId !== DEFAULT_ACCOUNT_ID && params.route.matchedBy === "default";
+  const isExplicitRouteBinding =
+    params.route.matchedBy !== "default" ||
+    params.configuredBinding != null ||
+    Boolean(params.configuredBindingSessionKey?.trim());
+  if (
+    !params.isGroup &&
+    !isNamedAccountFallback &&
+    !isExplicitRouteBinding &&
+    params.cfg.session?.dmScope == null &&
+    baseSessionKey === params.route.mainSessionKey
+  ) {
+    baseSessionKey = buildAgentSessionKey({
+      agentId: params.route.agentId,
+      channel: "telegram",
+      accountId: params.route.accountId,
+      peer: {
+        kind: "direct",
+        id: resolveTelegramDirectPeerId({
+          chatId: params.chatId,
+          senderId: params.senderId,
+        }),
+      },
+      dmScope: "per-channel-peer",
+      identityLinks: params.cfg.session?.identityLinks,
+    }).toLowerCase();
+    logVerbose(
+      `telegram: DM isolation override ${params.route.mainSessionKey} -> ${baseSessionKey} (default route, dmScope unset)`,
+    );
+  }
+  const sessionKey =
+    params.dmThreadId != null
+      ? resolveThreadSessionKeys({
+          baseSessionKey,
+          threadId: `${params.chatId}:${params.dmThreadId}`,
+        }).sessionKey
+      : baseSessionKey;
+  return {
+    baseSessionKey,
+    sessionKey,
+    route: {
+      ...params.route,
+      sessionKey,
+      lastRoutePolicy: deriveLastRoutePolicy({
+        sessionKey,
+        mainSessionKey: params.route.mainSessionKey,
+      }),
+    },
+  };
 }

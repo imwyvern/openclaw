@@ -9,22 +9,17 @@ import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { TelegramDirectConfig, TelegramGroupConfig } from "openclaw/plugin-sdk/config-runtime";
 import { ensureConfiguredBindingRouteReady } from "openclaw/plugin-sdk/conversation-runtime";
 import { recordChannelActivity } from "openclaw/plugin-sdk/infra-runtime";
-import { buildAgentSessionKey, deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
-import { DEFAULT_ACCOUNT_ID, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
+import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import { firstDefined, normalizeAllowFrom, normalizeDmAllowFromWithStore } from "./bot-access.js";
 import { resolveTelegramInboundBody } from "./bot-message-context.body.js";
 import { buildTelegramInboundContextPayload } from "./bot-message-context.session.js";
 import type { BuildTelegramMessageContextParams } from "./bot-message-context.types.js";
+import { buildTypingThreadParams, resolveTelegramThreadSpec } from "./bot/helpers.js";
 import {
-  buildTypingThreadParams,
-  resolveTelegramDirectPeerId,
-  resolveTelegramThreadSpec,
-} from "./bot/helpers.js";
-import {
-  resolveTelegramConversationBaseSessionKey,
   resolveTelegramConversationRoute,
+  resolveTelegramConversationSession,
 } from "./conversation-route.js";
 import { enforceTelegramDmAccess } from "./dm-access.js";
 import { evaluateTelegramGroupBaseAccess } from "./group-access.js";
@@ -227,57 +222,18 @@ export const buildTelegramMessageContext = async ({
     return false;
   };
 
-  let baseSessionKey = resolveTelegramConversationBaseSessionKey({
+  const session = resolveTelegramConversationSession({
     cfg: freshCfg,
     route,
     chatId,
     isGroup,
     senderId,
+    dmThreadId,
+    configuredBinding,
+    configuredBindingSessionKey,
   });
-  const dmScopeExplicit = freshCfg.session?.dmScope != null;
-  const isExplicitRouteBinding =
-    route.matchedBy !== "default" ||
-    configuredBinding != null ||
-    Boolean(configuredBindingSessionKey?.trim());
-  if (
-    !isGroup &&
-    !isNamedAccountFallback &&
-    !isExplicitRouteBinding &&
-    !dmScopeExplicit &&
-    baseSessionKey === route.mainSessionKey
-  ) {
-    baseSessionKey = buildAgentSessionKey({
-      agentId: route.agentId,
-      channel: "telegram",
-      accountId: route.accountId,
-      peer: {
-        kind: "direct",
-        id: resolveTelegramDirectPeerId({
-          chatId,
-          senderId,
-        }),
-      },
-      dmScope: "per-channel-peer",
-      identityLinks: freshCfg.session?.identityLinks,
-    }).toLowerCase();
-    logVerbose(
-      `telegram: DM isolation override ${route.mainSessionKey} -> ${baseSessionKey} (default route, dmScope unset)`,
-    );
-  }
-  // DMs: use thread suffix for session isolation (works regardless of dmScope)
-  const threadKeys =
-    dmThreadId != null
-      ? resolveThreadSessionKeys({ baseSessionKey, threadId: `${chatId}:${dmThreadId}` })
-      : null;
-  const sessionKey = threadKeys?.sessionKey ?? baseSessionKey;
-  route = {
-    ...route,
-    sessionKey,
-    lastRoutePolicy: deriveLastRoutePolicy({
-      sessionKey,
-      mainSessionKey: route.mainSessionKey,
-    }),
-  };
+  const sessionKey = session.sessionKey;
+  route = session.route;
   // Compute requireMention after access checks and final route selection.
   const activationOverride = resolveGroupActivation({
     chatId,
