@@ -18,7 +18,11 @@ import {
 import { buildOutboundBaseSessionKey, normalizeOutboundThreadId } from "openclaw/plugin-sdk/core";
 import { resolveExecApprovalCommandDisplay } from "openclaw/plugin-sdk/infra-runtime";
 import { buildExecApprovalPendingReplyPayload } from "openclaw/plugin-sdk/infra-runtime";
-import { resolveThreadSessionKeys, type RoutePeer } from "openclaw/plugin-sdk/routing";
+import {
+  buildAgentMainSessionKey,
+  deriveLastRoutePolicy,
+  type RoutePeer,
+} from "openclaw/plugin-sdk/routing";
 import { parseTelegramTopicConversation } from "../runtime-api.js";
 import {
   buildTokenChannelStatusSummary,
@@ -39,6 +43,7 @@ import {
 import { buildTelegramExecApprovalButtons } from "./approval-buttons.js";
 import { auditTelegramGroupMembership, collectTelegramUnmentionedGroupIds } from "./audit.js";
 import { buildTelegramGroupPeerId } from "./bot/helpers.js";
+import { resolveTelegramConversationSession } from "./conversation-route.js";
 import {
   listTelegramDirectoryGroupsFromConfig,
   listTelegramDirectoryPeersFromConfig,
@@ -231,13 +236,31 @@ function resolveTelegramOutboundSessionRoute(params: {
     accountId: params.accountId,
     peer,
   });
-  const threadKeys =
-    resolvedThreadId && !isGroup
-      ? resolveThreadSessionKeys({ baseSessionKey, threadId: String(resolvedThreadId) })
-      : null;
+  const mainSessionKey = buildAgentMainSessionKey({
+    agentId: params.agentId,
+  }).toLowerCase();
+  const session = resolveTelegramConversationSession({
+    cfg: params.cfg,
+    route: {
+      agentId: params.agentId,
+      channel: "telegram",
+      accountId: params.accountId ?? DEFAULT_ACCOUNT_ID,
+      sessionKey: baseSessionKey,
+      mainSessionKey,
+      lastRoutePolicy: deriveLastRoutePolicy({
+        sessionKey: baseSessionKey,
+        mainSessionKey,
+      }),
+      matchedBy: "default",
+    },
+    chatId,
+    isGroup,
+    senderId: isGroup ? undefined : chatId,
+    dmThreadId: resolvedThreadId && !isGroup ? resolvedThreadId : undefined,
+  });
   return {
-    sessionKey: threadKeys?.sessionKey ?? baseSessionKey,
-    baseSessionKey,
+    sessionKey: session.sessionKey,
+    baseSessionKey: session.baseSessionKey,
     peer,
     chatType: isGroup ? ("group" as const) : ("direct" as const),
     from: isGroup
