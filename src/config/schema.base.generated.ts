@@ -4554,6 +4554,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                         additionalProperties: false,
                       },
                     },
+                    maxConsecutiveToolOnlyTurns: {
+                      type: "integer",
+                      minimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                    notifyUserOnApiError: {
+                      type: "boolean",
+                    },
                     elevated: {
                       type: "object",
                       properties: {
@@ -4931,6 +4939,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
               },
               additionalProperties: false,
             },
+          },
+          maxConsecutiveToolOnlyTurns: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9007199254740991,
+          },
+          notifyUserOnApiError: {
+            type: "boolean",
           },
           web: {
             type: "object",
