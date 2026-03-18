@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## Unreleased
 
+### Breaking
+
+- Telegram/DM sessions: isolate default Telegram DMs from `agent:main:main` across inbound messages, native commands, model picker callbacks, and outbound sends. If you need the old shared-main behavior, set `session.dmScope: main`. (#41939) Thanks @imwyvern.
+
 ### Changes
 
 - Commands/btw: add `/btw` side questions for quick tool-less answers about the current session without changing future session context, with dismissible in-session TUI answers and explicit BTW replies on external channels. (#45444) Thanks @ngutman.

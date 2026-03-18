@@ -164,7 +164,11 @@ export function maybeRetireLegacyMainDeliveryRoute(params: {
   ctx: MsgContext;
 }): LegacyMainDeliveryRetirement | undefined {
   const dmScope = params.sessionCfg?.dmScope ?? "main";
-  if (dmScope === "main" || params.isGroup) {
+  const usesImplicitTelegramDmIsolation =
+    params.sessionCfg?.dmScope == null &&
+    resolveSessionKeyChannelHint(params.sessionKey) === "telegram" &&
+    isDirectSessionKey(params.sessionKey);
+  if ((dmScope === "main" && !usesImplicitTelegramDmIsolation) || params.isGroup) {
     return undefined;
   }
   const canonicalMainSessionKey = buildAgentMainSessionKey({

@@ -278,6 +278,7 @@ export const registerTelegramHandlers = ({
     sessionKey: string;
     model?: string;
   } => {
+    const freshCfg = telegramDeps.loadConfig();
     const resolvedThreadId =
       params.resolvedThreadId ??
       resolveTelegramForumThreadId({
@@ -289,7 +290,7 @@ export const registerTelegramHandlers = ({
     const { topicConfig } = resolveTelegramGroupConfig(params.chatId, topicThreadId);
     const { route, configuredBinding, configuredBindingSessionKey } =
       resolveTelegramConversationRoute({
-        cfg,
+        cfg: freshCfg,
         accountId,
         chatId: params.chatId,
         isGroup: params.isGroup,
@@ -299,7 +300,7 @@ export const registerTelegramHandlers = ({
         topicAgentId: topicConfig?.agentId,
       });
     const session = resolveTelegramConversationSession({
-      cfg,
+      cfg: freshCfg,
       route,
       chatId: params.chatId,
       isGroup: params.isGroup,
@@ -309,7 +310,7 @@ export const registerTelegramHandlers = ({
       configuredBindingSessionKey,
     });
     const sessionKey = session.sessionKey;
-    const storePath = telegramDeps.resolveStorePath(cfg.session?.store, {
+    const storePath = telegramDeps.resolveStorePath(freshCfg.session?.store, {
       agentId: session.route.agentId,
     });
     const store = loadSessionStore(storePath);
@@ -339,7 +340,7 @@ export const registerTelegramHandlers = ({
         model: `${provider}/${model}`,
       };
     }
-    const modelCfg = cfg.agents?.defaults?.model;
+    const modelCfg = freshCfg.agents?.defaults?.model;
     return {
       agentId: session.route.agentId,
       sessionEntry: entry,

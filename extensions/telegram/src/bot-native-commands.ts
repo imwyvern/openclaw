@@ -477,6 +477,7 @@ export const registerTelegramNativeCommands = ({
     chunkMode: ReturnType<typeof resolveChunkMode>;
   } | null> => {
     const { msg, isGroup, isForum, resolvedThreadId, senderId, topicAgentId } = params;
+    const freshCfg = telegramDeps.loadConfig();
     const chatId = msg.chat.id;
     const messageThreadId = (msg as { message_thread_id?: number }).message_thread_id;
     const threadSpec = resolveTelegramThreadSpec({
@@ -486,7 +487,7 @@ export const registerTelegramNativeCommands = ({
     });
     let { route, configuredBinding, configuredBindingSessionKey } =
       resolveTelegramConversationRoute({
-        cfg,
+        cfg: freshCfg,
         accountId,
         chatId,
         isGroup,
@@ -497,7 +498,7 @@ export const registerTelegramNativeCommands = ({
       });
     if (configuredBinding) {
       const ensured = await ensureConfiguredBindingRouteReady({
-        cfg,
+        cfg: freshCfg,
         bindingResolution: configuredBinding,
       });
       if (!ensured.ok) {
@@ -519,7 +520,7 @@ export const registerTelegramNativeCommands = ({
     }
     const dmThreadId = threadSpec.scope === "dm" ? threadSpec.id : undefined;
     const session = resolveTelegramConversationSession({
-      cfg,
+      cfg: freshCfg,
       route,
       chatId,
       isGroup,
@@ -529,13 +530,13 @@ export const registerTelegramNativeCommands = ({
       configuredBindingSessionKey,
     });
     route = session.route;
-    const mediaLocalRoots = getAgentScopedMediaLocalRoots(cfg, route.agentId);
+    const mediaLocalRoots = getAgentScopedMediaLocalRoots(freshCfg, route.agentId);
     const tableMode = resolveMarkdownTableMode({
-      cfg,
+      cfg: freshCfg,
       channel: "telegram",
       accountId: route.accountId,
     });
-    const chunkMode = resolveChunkMode(cfg, "telegram", route.accountId);
+    const chunkMode = resolveChunkMode(freshCfg, "telegram", route.accountId);
     return {
       chatId,
       threadSpec,
