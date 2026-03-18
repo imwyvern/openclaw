@@ -72,12 +72,21 @@ export type EmbeddedPiSubscribeState = {
   messagingToolSentTextsNormalized: string[];
   messagingToolSentTargets: MessagingToolSend[];
   messagingToolSentMediaUrls: string[];
+  messagingToolSentTextBaseline: number;
+  messagingToolSentMediaBaseline: number;
   pendingMessagingTexts: Map<string, string>;
   pendingMessagingTargets: Map<string, MessagingToolSend>;
   successfulCronAdds: number;
   pendingMessagingMediaUrls: Map<string, string[]>;
   deterministicApprovalPromptSent: boolean;
   lastAssistant?: AgentMessage;
+
+  /** Consecutive assistant turns that contained only tool calls and no text. */
+  consecutiveToolOnlyTurns: number;
+  /** Whether a tool-only turn nudge has been injected for the current streak. */
+  toolOnlyNudgeInjected: boolean;
+  /** Assistant message index already counted for the current tool-only streak. */
+  lastCountedToolOnlyMessageIndex: number;
 };
 
 export type EmbeddedPiSubscribeContext = {

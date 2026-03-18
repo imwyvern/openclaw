@@ -74,11 +74,16 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     messagingToolSentTextsNormalized: [],
     messagingToolSentTargets: [],
     messagingToolSentMediaUrls: [],
+    messagingToolSentTextBaseline: 0,
+    messagingToolSentMediaBaseline: 0,
     pendingMessagingTexts: new Map(),
     pendingMessagingTargets: new Map(),
     successfulCronAdds: 0,
     pendingMessagingMediaUrls: new Map(),
     deterministicApprovalPromptSent: false,
+    consecutiveToolOnlyTurns: 0,
+    toolOnlyNudgeInjected: false,
+    lastCountedToolOnlyMessageIndex: -1,
   };
   const usageTotals = {
     input: 0,
@@ -139,6 +144,8 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.lastAssistantTextNormalized = undefined;
     state.lastAssistantTextTrimmed = undefined;
     state.assistantTextBaseline = nextAssistantTextBaseline;
+    state.messagingToolSentTextBaseline = messagingToolSentTexts.length;
+    state.messagingToolSentMediaBaseline = messagingToolSentMediaUrls.length;
   };
 
   const rememberAssistantText = (text: string) => {
