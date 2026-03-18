@@ -382,8 +382,8 @@ export async function openWritableFileWithinRoot(params: {
   relativePath: string;
   mkdir?: boolean;
   mode?: number;
+  appendExisting?: boolean;
   truncateExisting?: boolean;
-  append?: boolean;
 }): Promise<SafeWritableOpenResult> {
   const { rootReal, rootWithSep, resolved } = await resolvePathWithinRoot(params);
   try {
@@ -419,8 +419,10 @@ export async function openWritableFileWithinRoot(params: {
 
   let handle: FileHandle;
   let createdForWrite = false;
-  const existingFlags = params.append ? OPEN_APPEND_EXISTING_FLAGS : OPEN_WRITE_EXISTING_FLAGS;
-  const createFlags = params.append ? OPEN_APPEND_CREATE_FLAGS : OPEN_WRITE_CREATE_FLAGS;
+  const existingFlags = params.appendExisting
+    ? OPEN_APPEND_EXISTING_FLAGS
+    : OPEN_WRITE_EXISTING_FLAGS;
+  const createFlags = params.appendExisting ? OPEN_APPEND_CREATE_FLAGS : OPEN_WRITE_CREATE_FLAGS;
   try {
     try {
       handle = await fs.open(ioPath, existingFlags, fileMode);
@@ -480,7 +482,7 @@ export async function openWritableFileWithinRoot(params: {
 
     // Truncate only after boundary and identity checks complete. This avoids
     // irreversible side effects if a symlink target changes before validation.
-    if (params.append !== true && params.truncateExisting !== false && !createdForWrite) {
+    if (params.appendExisting !== true && params.truncateExisting !== false && !createdForWrite) {
       await handle.truncate(0);
     }
     return {
@@ -513,7 +515,7 @@ export async function appendFileWithinRoot(params: {
     relativePath: params.relativePath,
     mkdir: params.mkdir,
     truncateExisting: false,
-    append: true,
+    appendExisting: true,
   });
   try {
     let prefix = "";
