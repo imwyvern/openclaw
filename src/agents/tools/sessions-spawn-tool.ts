@@ -128,6 +128,13 @@ export function createSessionsSpawnTool(
       const thread = params.thread === true;
       const notifyChannel = readStringParam(params, "notifyChannel");
       const notifyTarget = readStringParam(params, "notifyTarget");
+      if (Boolean(notifyChannel) !== Boolean(notifyTarget)) {
+        return jsonResult({
+          status: "error",
+          error:
+            "notifyChannel and notifyTarget must be provided together for completion notifications",
+        });
+      }
       const attachments = Array.isArray(params.attachments)
         ? (params.attachments as Array<{
             name: string;

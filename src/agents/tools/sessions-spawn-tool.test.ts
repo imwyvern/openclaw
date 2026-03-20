@@ -209,6 +209,24 @@ describe("sessions_spawn tool", () => {
     );
   });
 
+  it("rejects incomplete completion notification params for subagent runtime", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+    });
+
+    const result = await tool.execute("call-notify-invalid", {
+      task: "background work",
+      notifyChannel: "telegram",
+    });
+
+    expect(result.details).toMatchObject({
+      status: "error",
+    });
+    const details = result.details as { error?: string };
+    expect(details.error).toContain("notifyChannel and notifyTarget must be provided together");
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
   it("rejects resumeSessionId without runtime=acp", async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
