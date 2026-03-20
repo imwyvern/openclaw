@@ -392,6 +392,7 @@ describe("spawnAcpDirect", () => {
         matrix: {
           threadBindings: {
             enabled: true,
+            spawnAcpSessions: true,
           },
         },
       },
