@@ -8,6 +8,12 @@ type GatewayCall = {
 };
 
 const gatewayCalls: GatewayCall[] = [];
+let callGatewayImpl: (request: GatewayCall) => Promise<unknown> = async (request) => {
+  if (request.method === "chat.history") {
+    return { messages: [] };
+  }
+  return {};
+};
 let sessionStore: Record<string, Record<string, unknown>> = {};
 let configOverride: ReturnType<(typeof import("../config/config.js"))["loadConfig"]> = {
   session: {
@@ -23,7 +29,6 @@ let fallbackRequesterResolution: {
   requesterSessionKey: string;
   requesterOrigin?: { channel?: string; to?: string; accountId?: string };
 } | null = null;
-
 let chatHistoryMessages: Array<Record<string, unknown>> = [];
 
 vi.mock("../gateway/call.js", () => ({
@@ -32,7 +37,7 @@ vi.mock("../gateway/call.js", () => ({
     if (request.method === "chat.history") {
       return { messages: chatHistoryMessages };
     }
-    return {};
+    return await callGatewayImpl(request);
   }),
 }));
 
@@ -119,9 +124,31 @@ function findGatewayCall(predicate: (call: GatewayCall) => boolean): GatewayCall
   return gatewayCalls.find(predicate);
 }
 
+function findFinalDirectAgentCall(): GatewayCall | undefined {
+  return findGatewayCall((call) => call.method === "agent" && call.expectFinal === true);
+}
+
+function setupParentSessionFallback(parentSessionKey: string): void {
+  requesterDepthResolver = (sessionKey?: string) =>
+    sessionKey === parentSessionKey ? 1 : sessionKey?.includes(":subagent:") ? 1 : 0;
+  subagentSessionRunActive = false;
+  shouldIgnorePostCompletion = false;
+  fallbackRequesterResolution = {
+    requesterSessionKey: "agent:main:main",
+    requesterOrigin: { channel: "discord", to: "chan-main", accountId: "acct-main" },
+  };
+}
+
 describe("subagent announce timeout config", () => {
   beforeEach(() => {
     gatewayCalls.length = 0;
+    chatHistoryMessages = [];
+    callGatewayImpl = async (request) => {
+      if (request.method === "chat.history") {
+        return { messages: [] };
+      }
+      return {};
+    };
     sessionStore = {};
     configOverride = {
       session: defaultSessionConfig,
@@ -131,16 +158,15 @@ describe("subagent announce timeout config", () => {
     shouldIgnorePostCompletion = false;
     pendingDescendantRuns = 0;
     fallbackRequesterResolution = null;
-    chatHistoryMessages = [];
   });
 
-  it("uses 60s timeout by default for direct announce agent call", async () => {
+  it("uses 90s timeout by default for direct announce agent call", async () => {
     await runAnnounceFlowForTest("run-default-timeout");
 
     const directAgentCall = findGatewayCall(
       (call) => call.method === "agent" && call.expectFinal === true,
     );
-    expect(directAgentCall?.timeoutMs).toBe(60_000);
+    expect(directAgentCall?.timeoutMs).toBe(90_000);
   });
 
   it("honors configured announce timeout for direct announce agent call", async () => {
@@ -167,6 +193,35 @@ describe("subagent announce timeout config", () => {
       (call) => call.method === "agent" && call.expectFinal === true,
     );
     expect(completionDirectAgentCall?.timeoutMs).toBe(90_000);
+  });
+
+  it("does not retry gateway timeout for externally delivered completion announces", async () => {
+    vi.useFakeTimers();
+    try {
+      callGatewayImpl = async (request) => {
+        if (request.method === "chat.history") {
+          return { messages: [] };
+        }
+        throw new Error("gateway timeout after 90000ms");
+      };
+
+      await expect(
+        runAnnounceFlowForTest("run-completion-timeout-no-retry", {
+          requesterOrigin: {
+            channel: "telegram",
+            to: "12345",
+          },
+          expectsCompletionMessage: true,
+        }),
+      ).resolves.toBe(false);
+
+      const directAgentCalls = gatewayCalls.filter(
+        (call) => call.method === "agent" && call.expectFinal === true,
+      );
+      expect(directAgentCalls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("regression, skips parent announce while descendants are still pending", async () => {
@@ -209,9 +264,7 @@ describe("subagent announce timeout config", () => {
       requesterOrigin: { channel: "discord", to: "channel:cron-results", accountId: "acct-1" },
     });
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findFinalDirectAgentCall();
     expect(directAgentCall?.params?.sessionKey).toBe(cronSessionKey);
     expect(directAgentCall?.params?.deliver).toBe(false);
     expect(directAgentCall?.params?.channel).toBeUndefined();
@@ -221,15 +274,7 @@ describe("subagent announce timeout config", () => {
 
   it("regression, routes child announce to parent session instead of grandparent when parent session still exists", async () => {
     const parentSessionKey = "agent:main:subagent:parent";
-    requesterDepthResolver = (sessionKey?: string) =>
-      sessionKey === parentSessionKey ? 1 : sessionKey?.includes(":subagent:") ? 1 : 0;
-    subagentSessionRunActive = false;
-    shouldIgnorePostCompletion = false;
-    fallbackRequesterResolution = {
-      requesterSessionKey: "agent:main:main",
-      requesterOrigin: { channel: "discord", to: "chan-main", accountId: "acct-main" },
-    };
-    // No sessionId on purpose: existence in store should still count as alive.
+    setupParentSessionFallback(parentSessionKey);
     sessionStore[parentSessionKey] = { updatedAt: Date.now() };
 
     await runAnnounceFlowForTest("run-parent-route", {
@@ -238,23 +283,14 @@ describe("subagent announce timeout config", () => {
       childSessionKey: `${parentSessionKey}:subagent:child`,
     });
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findFinalDirectAgentCall();
     expect(directAgentCall?.params?.sessionKey).toBe(parentSessionKey);
     expect(directAgentCall?.params?.deliver).toBe(false);
   });
 
   it("regression, falls back to grandparent only when parent subagent session is missing", async () => {
     const parentSessionKey = "agent:main:subagent:parent-missing";
-    requesterDepthResolver = (sessionKey?: string) =>
-      sessionKey === parentSessionKey ? 1 : sessionKey?.includes(":subagent:") ? 1 : 0;
-    subagentSessionRunActive = false;
-    shouldIgnorePostCompletion = false;
-    fallbackRequesterResolution = {
-      requesterSessionKey: "agent:main:main",
-      requesterOrigin: { channel: "discord", to: "chan-main", accountId: "acct-main" },
-    };
+    setupParentSessionFallback(parentSessionKey);
 
     await runAnnounceFlowForTest("run-parent-fallback", {
       requesterSessionKey: parentSessionKey,
@@ -262,9 +298,7 @@ describe("subagent announce timeout config", () => {
       childSessionKey: `${parentSessionKey}:subagent:child`,
     });
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findFinalDirectAgentCall();
     expect(directAgentCall?.params?.sessionKey).toBe("agent:main:main");
     expect(directAgentCall?.params?.deliver).toBe(true);
     expect(directAgentCall?.params?.channel).toBe("discord");
@@ -272,166 +306,85 @@ describe("subagent announce timeout config", () => {
     expect(directAgentCall?.params?.accountId).toBe("acct-main");
   });
 
-  it("includes partial progress from assistant messages when subagent times out", async () => {
-    // Simulate a session with assistant text from intermediate tool-call rounds.
+  it("uses partial progress on timeout when the child only made tool calls", async () => {
     chatHistoryMessages = [
       { role: "user", content: "do a complex task" },
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "I'll start by reading the files..." },
-          { type: "toolCall", id: "call1", name: "read", arguments: {} },
-        ],
+        content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }],
       },
+      { role: "toolResult", toolCallId: "call-1", content: [{ type: "text", text: "data" }] },
       {
-        role: "toolResult",
-        toolCallId: "call1",
-        content: [{ type: "text", text: "file contents" }],
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-2", name: "exec", arguments: {} }],
       },
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "Now analyzing the code structure. Found 3 modules." },
-          { type: "toolCall", id: "call2", name: "read", arguments: {} },
-        ],
-      },
-      { role: "toolResult", toolCallId: "call2", content: [{ type: "text", text: "more data" }] },
-      // Last assistant turn was a tool call with no text — simulating mid-work timeout.
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "call3", name: "exec", arguments: {} }],
+        content: [{ type: "toolCall", id: "call-3", name: "search", arguments: {} }],
       },
     ];
 
-    await runAnnounceFlowForTest("run-timeout-partial", {
+    await runAnnounceFlowForTest("run-timeout-partial-progress", {
       outcome: { status: "timeout" },
       roundOneReply: undefined,
     });
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
-    expect(directAgentCall).toBeDefined();
-
-    // The announce message should contain the partial progress.
-    const internalEvents =
-      (directAgentCall?.params?.internalEvents as Array<{
-        result?: string;
-        statusLabel?: string;
-      }>) ?? [];
-    expect(internalEvents[0]?.statusLabel).toBe("timed out");
-    // The result should include the partial assistant text, not just "(no output)".
-    expect(internalEvents[0]?.result).toBeTruthy();
-    expect(internalEvents[0]?.result).not.toBe("(no output)");
-    expect(internalEvents[0]?.result).toContain("tool call");
-    // Verify assistant text fragments are extracted, not just tool call counts.
-    expect(internalEvents[0]?.result).toContain("reading the files");
-    expect(internalEvents[0]?.result).toContain("analyzing the code structure");
-  });
-
-  it("reports tool call count in partial progress for timeout with no assistant text", async () => {
-    // Subagent only made tool calls but never produced assistant text.
-    chatHistoryMessages = [
-      { role: "user", content: "do something" },
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "call1", name: "read", arguments: {} }],
-      },
-      { role: "toolResult", toolCallId: "call1", content: [{ type: "text", text: "data" }] },
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "call2", name: "exec", arguments: {} }],
-      },
-    ];
-
-    await runAnnounceFlowForTest("run-timeout-no-text", {
-      outcome: { status: "timeout" },
-      roundOneReply: undefined,
-    });
-
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findFinalDirectAgentCall();
     const internalEvents =
       (directAgentCall?.params?.internalEvents as Array<{ result?: string }>) ?? [];
-    // Should report tool call count even without assistant text.
-    expect(internalEvents[0]?.result).toContain("2 tool call(s)");
+    expect(internalEvents[0]?.result).toContain("3 tool call(s)");
+    expect(internalEvents[0]?.result).not.toContain("data");
   });
 
-  it("counts toolUse blocks in timeout partial progress", async () => {
+  it("preserves NO_REPLY when timeout history ends with silence after earlier progress", async () => {
     chatHistoryMessages = [
-      { role: "user", content: "do something" },
-      {
-        role: "assistant",
-        content: [{ type: "toolUse", id: "call1", name: "read", input: {} }],
-      },
-      { role: "toolResult", toolCallId: "call1", content: [{ type: "text", text: "data" }] },
-      {
-        role: "assistant",
-        content: [{ type: "toolUse", id: "call2", name: "exec", input: {} }],
-      },
-    ];
-
-    await runAnnounceFlowForTest("run-timeout-tooluse", {
-      outcome: { status: "timeout" },
-      roundOneReply: undefined,
-    });
-
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
-    const internalEvents =
-      (directAgentCall?.params?.internalEvents as Array<{ result?: string }>) ?? [];
-    expect(internalEvents[0]?.result).toContain("2 tool call(s)");
-  });
-
-  it("counts functionCall blocks in timeout partial progress", async () => {
-    chatHistoryMessages = [
-      { role: "user", content: "do something" },
-      {
-        role: "assistant",
-        content: [{ type: "functionCall", id: "call1", name: "read", arguments: {} }],
-      },
-      { role: "toolResult", toolCallId: "call1", content: [{ type: "text", text: "data" }] },
-      {
-        role: "assistant",
-        content: [{ type: "functionCall", id: "call2", name: "exec", arguments: {} }],
-      },
-    ];
-
-    await runAnnounceFlowForTest("run-timeout-functioncall", {
-      outcome: { status: "timeout" },
-      roundOneReply: undefined,
-    });
-
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
-    const internalEvents =
-      (directAgentCall?.params?.internalEvents as Array<{ result?: string }>) ?? [];
-    expect(internalEvents[0]?.result).toContain("2 tool call(s)");
-  });
-
-  it("preserves NO_REPLY when timeout partial progress exists", async () => {
-    chatHistoryMessages = [
-      { role: "user", content: "do something" },
       {
         role: "assistant",
         content: [
           { type: "text", text: "Still working through the files." },
-          { type: "toolCall", id: "call1", name: "read", arguments: {} },
+          { type: "toolCall", id: "call-1", name: "read", arguments: {} },
         ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "NO_REPLY" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-2", name: "exec", arguments: {} }],
       },
     ];
 
     await runAnnounceFlowForTest("run-timeout-no-reply", {
       outcome: { status: "timeout" },
-      roundOneReply: " NO_REPLY ",
+      roundOneReply: undefined,
     });
 
-    expect(
-      findGatewayCall((call) => call.method === "agent" && call.expectFinal === true),
-    ).toBeUndefined();
+    expect(findFinalDirectAgentCall()).toBeUndefined();
+  });
+
+  it("prefers visible assistant progress over a later raw tool result", async () => {
+    chatHistoryMessages = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Read 12 files. Narrowing the search now." }],
+      },
+      {
+        role: "toolResult",
+        content: [{ type: "text", text: "grep output" }],
+      },
+    ];
+
+    await runAnnounceFlowForTest("run-timeout-visible-assistant", {
+      outcome: { status: "timeout" },
+      roundOneReply: undefined,
+    });
+
+    const directAgentCall = findFinalDirectAgentCall();
+    const internalEvents =
+      (directAgentCall?.params?.internalEvents as Array<{ result?: string }>) ?? [];
+    expect(internalEvents[0]?.result).toContain("Read 12 files");
+    expect(internalEvents[0]?.result).not.toContain("grep output");
   });
 
   it("preserves NO_REPLY when timeout partial-progress history mixes prior text and later silence", async () => {
